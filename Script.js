@@ -23,7 +23,7 @@
     { label: 'Outro (digitar manualmente)', value: '__custom__' }
   ];
 
-  // Chaves GM 
+  // Chaves GM
   // autoMinMin : intervalo mínimo de auto-página em minutos (default 2)
   // autoMaxMin : intervalo máximo de auto-página em minutos (default 3)
   // Limites de segurança: mín 0,5 min (30s) · máx 60 min (1h)
@@ -182,7 +182,7 @@
     }
   }
 
-    // NOVA FUNÇÃO RENDERPANEL (FLUTUANTE E ARRASTÁVEL) 
+    // NOVA FUNÇÃO RENDERPANEL (FLUTUANTE E ARRASTÁVEL)
   function renderPanel(html) {
     let panel = document.getElementById('ea-panel');
 
@@ -719,7 +719,7 @@
 
       intervalErr.textContent = '';
 
-      // Persistir 
+      // Persistir
       GM_setValue('selectedModel', novoModelo);
       GM_setValue('autoMinMin', minVal);
       GM_setValue('autoMaxMin', maxVal);
@@ -734,6 +734,7 @@
     let autoPageActive = false;
     let autoPageTimer  = null;
     let quizProcessando = false;
+    let retomarAposQuiz = false;   // lembra que o auto-page estava ligado antes do quiz abrir
 
     function renderPainelPrincipal() {
       const svgLivro = `
@@ -799,7 +800,7 @@
         });
       };
 
-      //  Auto-page 
+      //  Auto-page
       function isQuizOpen() {
         const modal = document.querySelector('ngb-modal-window.quiz-modal') ||
                       document.querySelector('[role="dialog"]');
@@ -824,7 +825,7 @@
             }));
           }
 
-          //  Lê intervalo configurado pelo usuário 
+          //  Lê intervalo configurado pelo usuário
           const minMs = GM_getValue('autoMinMin', AUTO_MIN_DEFAULT) * 60000;
           const maxMs = GM_getValue('autoMaxMin', AUTO_MAX_DEFAULT) * 60000;
           const delay = Math.random() * (maxMs - minMs) + minMs;
@@ -848,7 +849,7 @@
                document.querySelector('[role="dialog"]');
       }
 
-      //  Tela final 
+      //  Tela final
       function detectarTelaFinal() {
         const modal = getModal();
         if (!modal) return null;
@@ -859,7 +860,7 @@
         return todosFund2.find(b => b.textContent.includes('Continuar')) || null;
       }
 
-      //  Extração do quiz 
+      //  Extração do quiz
       function extrair() {
         const modal = getModal();
         if (!modal) return null;
@@ -996,7 +997,7 @@ Se não, escolha outra.`;
         });
       }
 
-      // Dissertativa 
+      // Dissertativa
       function colarResposta(texto) {
         const modal = getModal();
         if (!modal) return;
@@ -1056,15 +1057,14 @@ Se não, escolha outra.`;
           setStatus('Próxima!', '#a6e3a1');
       }
 
-      //  Run 
+      //  Run
       async function run() {
         if (quizProcessando) return;
         quizProcessando = true;
 
         if (observer) observer.disconnect();
 
-        const eraAtivo = autoPageActive;
-        if (eraAtivo) stopAutoPage();
+        // O auto-page já foi parado pelo observer (que também marcou retomarAposQuiz).
 
         try {
           setStatus('Lendo...', '#89b4fa');
@@ -1123,13 +1123,14 @@ Se não, escolha outra.`;
         } finally {
           quizProcessando = false;
           if (observer) observer.observe(document.body, { childList: true, subtree: true });
-          if (eraAtivo) startAutoPage();
+          // A retomada do auto-page agora acontece no observer, quando o modal fechar.
         }
       }
 
       // Botões
       autoBtn.addEventListener('click', () => {
         if (autoPageActive) {
+          retomarAposQuiz = false;   // parada manual cancela qualquer retomada pendente
           stopAutoPage();
         } else {
           startAutoPage();
@@ -1137,6 +1138,7 @@ Se não, escolha outra.`;
       });
 
       resetBtn.onclick = () => {
+        retomarAposQuiz = false;
         stopAutoPage();
         GM_setValue('apiKey', '');
         GM_setValue('bookTitle', '');
@@ -1146,7 +1148,7 @@ Se não, escolha outra.`;
         init();
       };
 
-      // MutationObserver 
+      // MutationObserver
       setStatus(
         apiKey ? '🛈 Modo com IA ativa' : 'ⓘ Modo de apenas leitura',
         apiKey ? '#a6e3a1' : '#f9e2af'
@@ -1162,12 +1164,20 @@ Se não, escolha outra.`;
         debounceTimer = setTimeout(() => {
           if (quizProcessando) return;
 
+          // Modal fechou e o auto-page estava ligado antes do quiz → retoma
+          if (retomarAposQuiz && !getModal()) {
+            retomarAposQuiz = false;
+            startAutoPage();
+            return;
+          }
+
           const continuarBtn = detectarTelaFinal();
           if (continuarBtn) {
             continuarBtn.click();
             const esperarFechar = setInterval(() => {
               if (!getModal()) {
                 clearInterval(esperarFechar);
+                retomarAposQuiz = false;   // evita retomada dupla
                 startAutoPage();
               }
             }, 300);
@@ -1176,6 +1186,10 @@ Se não, escolha outra.`;
 
           if (!apiKey) return;
           if (!extrair()) return;
+
+          // OR: o observer dispara várias vezes no mesmo quiz e, nas chamadas
+          // seguintes, autoPageActive já é false — nunca sobrescrever com false.
+          retomarAposQuiz = retomarAposQuiz || autoPageActive;
           stopAutoPage();
           run();
         }, 300);
